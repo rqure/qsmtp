@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"time"
 
 	qdb "github.com/rqure/qdb/src"
 )
@@ -16,6 +15,32 @@ func getDatabaseAddress() string {
 	return addr
 }
 
+func getEmailAddress() string {
+	return os.Getenv("QDB_EMAIL_ADDRESS")
+}
+
+func getEmailPassword() string {
+	return os.Getenv("QDB_EMAIL_PASSWORD")
+}
+
+func getEmailHost() string {
+	host := os.Getenv("QDB_EMAIL_HOST")
+	if host == "" {
+		host = "smtp.gmail.com"
+	}
+
+	return host
+}
+
+func getEmailPort() string {
+	port := os.Getenv("QDB_EMAIL_PORT")
+	if port == "" {
+		port = "587"
+	}
+
+	return port
+}
+
 func main() {
 	db := qdb.NewRedisDatabase(qdb.RedisDatabaseConfig{
 		Address: getDatabaseAddress(),
@@ -23,11 +48,16 @@ func main() {
 
 	dbWorker := qdb.NewDatabaseWorker(db)
 	leaderElectionWorker := qdb.NewLeaderElectionWorker(db)
-	clockWorker := NewClockWorker(db, 1*time.Second)
+	smtpWorker := NewSmtpWorker(db, SmtpConfig{
+		EmailAddress: getEmailAddress(),
+		EmailPwd:     getEmailPassword(),
+		Host:         getEmailHost(),
+		Port:         getEmailPort(),
+	})
 	schemaValidator := qdb.NewSchemaValidator(db)
 
 	schemaValidator.AddEntity("Root", "SchemaUpdateTrigger")
-	schemaValidator.AddEntity("SystemClock", "CurrentTime")
+	schemaValidator.AddEntity("SmtpController", "To", "Cc", "Subject", "Body", "SendTrigger")
 
 	dbWorker.Signals.SchemaUpdated.Connect(qdb.Slot(schemaValidator.ValidationRequired))
 	dbWorker.Signals.Connected.Connect(qdb.Slot(schemaValidator.ValidationRequired))
@@ -38,16 +68,16 @@ func main() {
 	dbWorker.Signals.Connected.Connect(qdb.Slot(leaderElectionWorker.OnDatabaseConnected))
 	dbWorker.Signals.Disconnected.Connect(qdb.Slot(leaderElectionWorker.OnDatabaseDisconnected))
 
-	leaderElectionWorker.Signals.BecameLeader.Connect(qdb.Slot(clockWorker.OnBecameLeader))
-	leaderElectionWorker.Signals.LosingLeadership.Connect(qdb.Slot(clockWorker.OnLostLeadership))
+	leaderElectionWorker.Signals.BecameLeader.Connect(qdb.Slot(smtpWorker.OnBecameLeader))
+	leaderElectionWorker.Signals.LosingLeadership.Connect(qdb.Slot(smtpWorker.OnLostLeadership))
 
 	// Create a new application configuration
 	config := qdb.ApplicationConfig{
-		Name: "clock",
+		Name: "smtp",
 		Workers: []qdb.IWorker{
 			dbWorker,
 			leaderElectionWorker,
-			clockWorker,
+			smtpWorker,
 		},
 	}
 
