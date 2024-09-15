@@ -77,22 +77,24 @@ func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification)
 			body,
 	)
 
-	auth := smtp.PlainAuth("", w.config.EmailAddress, w.config.EmailPwd, w.config.Host)
+	go func() {
+		auth := smtp.PlainAuth("", w.config.EmailAddress, w.config.EmailPwd, w.config.Host)
 
-	err := smtp.SendMail(
-		w.config.Host+":"+w.config.Port,
-		auth,
-		from,
-		allRecipients,
-		message,
-	)
+		err := smtp.SendMail(
+			w.config.Host+":"+w.config.Port,
+			auth,
+			from,
+			allRecipients,
+			message,
+		)
 
-	if err != nil {
-		qdb.Error("[SmtpWorker::ProcessNotification] Error sending email: %v. Message was: %v", err, message)
-		return
-	}
+		if err != nil {
+			qdb.Error("[SmtpWorker::ProcessNotification] Error sending email: %v. Message was: %v", err, message)
+			return
+		}
 
-	qdb.Info("[SmtpWorker::ProcessNotification] Email sent successfully")
+		qdb.Info("[SmtpWorker::ProcessNotification] Email sent successfully")
+	}()
 }
 
 func (w *SmtpWorker) Init() {
