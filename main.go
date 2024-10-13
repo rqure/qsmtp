@@ -84,6 +84,8 @@ func main() {
 	// Create a new application
 	app := qdb.NewApplication(config)
 
+	smtpWorker.Signals.Quit.Connect(qdb.Slot(app.Quit))
+
 	// Execute the application
 	app.Execute()
 }

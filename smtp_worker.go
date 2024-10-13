@@ -14,12 +14,18 @@ type SmtpConfig struct {
 	Port         string
 }
 
+type SmtpWorkerSignals struct {
+	Quit qdb.Signal
+}
+
 type SmtpWorker struct {
 	db                 qdb.IDatabase
 	isLeader           bool
 	notificationTokens []qdb.INotificationToken
 
 	config SmtpConfig
+
+	Signals SmtpWorkerSignals
 }
 
 func NewSmtpWorker(db qdb.IDatabase, config SmtpConfig) *SmtpWorker {
@@ -90,6 +96,7 @@ func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification)
 
 		if err != nil {
 			qdb.Error("[SmtpWorker::ProcessNotification] Error sending email: %v. Message was: %v", err, message)
+			w.Signals.Quit.Emit()
 			return
 		}
 
