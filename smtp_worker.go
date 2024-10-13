@@ -96,6 +96,9 @@ func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification)
 
 		if err != nil {
 			qdb.Error("[SmtpWorker::ProcessNotification] Error sending email: %v. Message was: %v", err, message)
+
+			// If we can't send the email, we should quit the application
+			// because it may be a networking issue with the container
 			w.Signals.Quit.Emit()
 			return
 		}
