@@ -4,27 +4,30 @@ import (
 	"os"
 
 	qdb "github.com/rqure/qdb/src"
+	"github.com/rqure/qlib/pkg/app"
+	"github.com/rqure/qlib/pkg/app/workers"
+	"github.com/rqure/qlib/pkg/data/store"
 )
 
 func getDatabaseAddress() string {
-	addr := os.Getenv("QDB_ADDR")
+	addr := os.Getenv("Q_ADDR")
 	if addr == "" {
-		addr = "redis:6379"
+		addr = "ws://webgateway:20000/ws"
 	}
 
 	return addr
 }
 
 func getEmailAddress() string {
-	return os.Getenv("QDB_EMAIL_ADDRESS")
+	return os.Getenv("Q_EMAIL_ADDRESS")
 }
 
 func getEmailPassword() string {
-	return os.Getenv("QDB_EMAIL_PASSWORD")
+	return os.Getenv("Q_EMAIL_PASSWORD")
 }
 
 func getEmailHost() string {
-	host := os.Getenv("QDB_EMAIL_HOST")
+	host := os.Getenv("Q_EMAIL_HOST")
 	if host == "" {
 		host = "smtp.gmail.com"
 	}
@@ -33,7 +36,7 @@ func getEmailHost() string {
 }
 
 func getEmailPort() string {
-	port := os.Getenv("QDB_EMAIL_PORT")
+	port := os.Getenv("Q_EMAIL_PORT")
 	if port == "" {
 		port = "587"
 	}
@@ -42,49 +45,43 @@ func getEmailPort() string {
 }
 
 func main() {
-	db := qdb.NewRedisDatabase(qdb.RedisDatabaseConfig{
+	db := store.NewWeb(store.WebConfig{
 		Address: getDatabaseAddress(),
 	})
 
-	dbWorker := qdb.NewDatabaseWorker(db)
-	leaderElectionWorker := qdb.NewLeaderElectionWorker(db)
+	storeWorker := workers.NewStore(db)
+	leadershipWorker := workers.NewLeadership(db)
 	smtpWorker := NewSmtpWorker(db, SmtpConfig{
 		EmailAddress: getEmailAddress(),
 		EmailPwd:     getEmailPassword(),
 		Host:         getEmailHost(),
 		Port:         getEmailPort(),
 	})
-	schemaValidator := qdb.NewSchemaValidator(db)
+	schemaValidator := leadershipWorker.GetEntityFieldValidator()
 
-	schemaValidator.AddEntity("Root", "SchemaUpdateTrigger")
-	schemaValidator.AddEntity("SmtpController", "To", "Cc", "Subject", "Body", "SendTrigger")
+	schemaValidator.RegisterEntityFields("Root", "SchemaUpdateTrigger")
+	schemaValidator.RegisterEntityFields("SmtpController", "To", "Cc", "Subject", "Body", "SendTrigger")
 
-	dbWorker.Signals.SchemaUpdated.Connect(qdb.Slot(schemaValidator.ValidationRequired))
-	dbWorker.Signals.Connected.Connect(qdb.Slot(schemaValidator.ValidationRequired))
-	leaderElectionWorker.AddAvailabilityCriteria(func() bool {
-		return dbWorker.IsConnected() && schemaValidator.IsValid()
-	})
+	storeWorker.Connected.Connect(leadershipWorker.OnStoreConnected)
+	storeWorker.Disconnected.Connect(leadershipWorker.OnStoreDisconnected)
 
-	dbWorker.Signals.Connected.Connect(qdb.Slot(leaderElectionWorker.OnDatabaseConnected))
-	dbWorker.Signals.Disconnected.Connect(qdb.Slot(leaderElectionWorker.OnDatabaseDisconnected))
-
-	leaderElectionWorker.Signals.BecameLeader.Connect(qdb.Slot(smtpWorker.OnBecameLeader))
-	leaderElectionWorker.Signals.LosingLeadership.Connect(qdb.Slot(smtpWorker.OnLostLeadership))
+	leadershipWorker.BecameLeader().Connect(smtpWorker.OnBecameLeader)
+	leadershipWorker.LosingLeadership().Connect(smtpWorker.OnLostLeadership)
 
 	// Create a new application configuration
 	config := qdb.ApplicationConfig{
 		Name: "smtp",
 		Workers: []qdb.IWorker{
-			dbWorker,
-			leaderElectionWorker,
+			storeWorker,
+			leadershipWorker,
 			smtpWorker,
 		},
 	}
 
 	// Create a new application
-	app := qdb.NewApplication(config)
+	app := app.NewApplication(config)
 
-	smtpWorker.Signals.Quit.Connect(qdb.Slot(app.Quit))
+	smtpWorker.Signals.Quit.Connect(app.Quit)
 
 	// Execute the application
 	app.Execute()

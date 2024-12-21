@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"net/smtp"
 	"strings"
 
 	qdb "github.com/rqure/qdb/src"
+	"github.com/rqure/qlib/pkg/app"
+	"github.com/rqure/qlib/pkg/data"
+	"github.com/rqure/qlib/pkg/data/notification"
+	"github.com/rqure/qlib/pkg/log"
 )
 
 type SmtpConfig struct {
@@ -19,28 +24,28 @@ type SmtpWorkerSignals struct {
 }
 
 type SmtpWorker struct {
-	db                 qdb.IDatabase
+	store              data.Store
 	isLeader           bool
-	notificationTokens []qdb.INotificationToken
+	notificationTokens []data.NotificationToken
 
 	config SmtpConfig
 
 	Signals SmtpWorkerSignals
 }
 
-func NewSmtpWorker(db qdb.IDatabase, config SmtpConfig) *SmtpWorker {
+func NewSmtpWorker(store data.Store, config SmtpConfig) *SmtpWorker {
 	return &SmtpWorker{
 		db:                 db,
 		isLeader:           false,
-		notificationTokens: []qdb.INotificationToken{},
+		notificationTokens: []data.NotificationToken{},
 		config:             config,
 	}
 }
 
-func (w *SmtpWorker) OnBecameLeader() {
+func (w *SmtpWorker) OnBecameLeader(context.Context) {
 	w.isLeader = true
 
-	w.notificationTokens = append(w.notificationTokens, w.db.Notify(&qdb.DatabaseNotificationConfig{
+	w.notificationTokens = append(w.notificationTokens, w.store.Notify(&qdb.DatabaseNotificationConfig{
 		Type:  "SmtpController",
 		Field: "SendTrigger",
 		ContextFields: []string{
@@ -49,31 +54,31 @@ func (w *SmtpWorker) OnBecameLeader() {
 			"Subject",
 			"Body",
 		},
-	}, qdb.NewNotificationCallback(w.ProcessNotification)))
+	}, notification.NewCallback(w.ProcessNotification)))
 }
 
-func (w *SmtpWorker) OnLostLeadership() {
+func (w *SmtpWorker) OnLostLeadership(context.Context) {
 	w.isLeader = false
 
 	for _, token := range w.notificationTokens {
 		token.Unbind()
 	}
 
-	w.notificationTokens = []qdb.INotificationToken{}
+	w.notificationTokens = []data.NotificationToken{}
 }
 
-func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification) {
+func (w *SmtpWorker) ProcessNotification(ctx context.Context, notification data.Notification) {
 	if !w.isLeader {
 		return
 	}
 
-	qdb.Info("[SmtpWorker::ProcessNotification] Received notification: %v", notification)
+	log.Info("Received notification: %v", notification)
 
 	from := w.config.EmailAddress
-	to := strings.Split(qdb.ValueCast[*qdb.String](notification.Context[0].Value).Raw, ",")
-	cc := strings.Split(qdb.ValueCast[*qdb.String](notification.Context[1].Value).Raw, ",")
-	subject := qdb.ValueCast[*qdb.String](notification.Context[2].Value).Raw
-	body := qdb.ValueCast[*qdb.String](notification.Context[3].Value).Raw
+	to := strings.Split(notification.GetContext(0).GetValue().GetString(), ",")
+	cc := strings.Split(notification.GetContext(1).GetValue().GetString(), ",")
+	subject := notification.GetContext(2).GetValue().GetString()
+	body := notification.GetContext(3).GetValue().GetString()
 	allRecipients := append(to, cc...)
 	message := []byte(
 		"From: " + from + "\n" +
@@ -95,7 +100,7 @@ func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification)
 		)
 
 		if err != nil {
-			qdb.Error("[SmtpWorker::ProcessNotification] Error sending email: %v. Message was: %v", err, message)
+			log.Error("Error sending email: %v. Message was: %v", err, message)
 
 			// If we can't send the email, we should quit the application
 			// because it may be a networking issue with the container
@@ -103,18 +108,18 @@ func (w *SmtpWorker) ProcessNotification(notification *qdb.DatabaseNotification)
 			return
 		}
 
-		qdb.Info("[SmtpWorker::ProcessNotification] Email sent successfully")
+		log.Info("Email sent successfully")
 	}()
 }
 
-func (w *SmtpWorker) Init() {
+func (w *SmtpWorker) Init(context.Context, app.Handle) {
 
 }
 
-func (w *SmtpWorker) Deinit() {
+func (w *SmtpWorker) Deinit(context.Context) {
 
 }
 
-func (w *SmtpWorker) DoWork() {
+func (w *SmtpWorker) DoWork(context.Context) {
 
 }
