@@ -81,7 +81,7 @@ func main() {
 	// Create a new application
 	app := app.NewApplication(config)
 
-	smtpWorker.Signals.Quit.Connect(app.Quit)
+	smtpWorker.Quit.Connect(app.Quit)
 
 	// Execute the application
 	app.Execute()

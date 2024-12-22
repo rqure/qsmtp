@@ -19,7 +19,7 @@ type SmtpConfig struct {
 	Port         string
 }
 
-type SmtpWorkerSignals struct {
+type SmtpWorkerstruct {
 	Quit qdb.Signal
 }
 
@@ -30,7 +30,7 @@ type SmtpWorker struct {
 
 	config SmtpConfig
 
-	Signals SmtpWorkerSignals
+	SmtpWorkerSignals
 }
 
 func NewSmtpWorker(store data.Store, config SmtpConfig) *SmtpWorker {
@@ -104,7 +104,7 @@ func (w *SmtpWorker) ProcessNotification(ctx context.Context, notification data.
 
 			// If we can't send the email, we should quit the application
 			// because it may be a networking issue with the container
-			w.Signals.Quit.Emit()
+			w.Quit.Emit()
 			return
 		}
 
