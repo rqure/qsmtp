@@ -5,7 +5,6 @@ import (
 	"net/smtp"
 	"strings"
 
-	qdb "github.com/rqure/qdb/src"
 	"github.com/rqure/qlib/pkg/app"
 	"github.com/rqure/qlib/pkg/data"
 	"github.com/rqure/qlib/pkg/data/notification"
@@ -19,66 +18,62 @@ type SmtpConfig struct {
 	Port         string
 }
 
-type SmtpWorkerstruct {
-	Quit qdb.Signal
-}
-
 type SmtpWorker struct {
 	store              data.Store
 	isLeader           bool
 	notificationTokens []data.NotificationToken
 
 	config SmtpConfig
-
-	SmtpWorkerSignals
 }
 
 func NewSmtpWorker(store data.Store, config SmtpConfig) *SmtpWorker {
 	return &SmtpWorker{
-		db:                 db,
+		store:              store,
 		isLeader:           false,
 		notificationTokens: []data.NotificationToken{},
 		config:             config,
 	}
 }
 
-func (w *SmtpWorker) OnBecameLeader(context.Context) {
+func (w *SmtpWorker) OnBecameLeader(ctx context.Context) {
 	w.isLeader = true
 
-	w.notificationTokens = append(w.notificationTokens, w.store.Notify(&qdb.DatabaseNotificationConfig{
-		Type:  "SmtpController",
-		Field: "SendTrigger",
-		ContextFields: []string{
-			"To",
-			"Cc",
-			"Subject",
-			"Body",
-		},
-	}, notification.NewCallback(w.ProcessNotification)))
+	w.notificationTokens = append(w.notificationTokens, w.store.Notify(
+		ctx,
+		notification.NewConfig().
+			SetEntityType("SmtpController").
+			SetFieldName("SendTrigger").
+			SetContextFields(
+				"To",
+				"Cc",
+				"Subject",
+				"Body",
+			),
+		notification.NewCallback(w.ProcessNotification)))
 }
 
-func (w *SmtpWorker) OnLostLeadership(context.Context) {
+func (w *SmtpWorker) OnLostLeadership(ctx context.Context) {
 	w.isLeader = false
 
 	for _, token := range w.notificationTokens {
-		token.Unbind()
+		token.Unbind(ctx)
 	}
 
 	w.notificationTokens = []data.NotificationToken{}
 }
 
-func (w *SmtpWorker) ProcessNotification(ctx context.Context, notification data.Notification) {
+func (w *SmtpWorker) ProcessNotification(ctx context.Context, n data.Notification) {
 	if !w.isLeader {
 		return
 	}
 
-	log.Info("Received notification: %v", notification)
+	log.Info("Received notification: %v", n)
 
 	from := w.config.EmailAddress
-	to := strings.Split(notification.GetContext(0).GetValue().GetString(), ",")
-	cc := strings.Split(notification.GetContext(1).GetValue().GetString(), ",")
-	subject := notification.GetContext(2).GetValue().GetString()
-	body := notification.GetContext(3).GetValue().GetString()
+	to := strings.Split(n.GetContext(0).GetValue().GetString(), ",")
+	cc := strings.Split(n.GetContext(1).GetValue().GetString(), ",")
+	subject := n.GetContext(2).GetValue().GetString()
+	body := n.GetContext(3).GetValue().GetString()
 	allRecipients := append(to, cc...)
 	message := []byte(
 		"From: " + from + "\n" +
@@ -100,11 +95,9 @@ func (w *SmtpWorker) ProcessNotification(ctx context.Context, notification data.
 		)
 
 		if err != nil {
-			log.Error("Error sending email: %v. Message was: %v", err, message)
-
 			// If we can't send the email, we should quit the application
 			// because it may be a networking issue with the container
-			w.Quit.Emit()
+			log.Panic("Error sending email: %v. Message was: %v", err, message)
 			return
 		}
 

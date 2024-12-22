@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 
-	qdb "github.com/rqure/qdb/src"
 	"github.com/rqure/qlib/pkg/app"
 	"github.com/rqure/qlib/pkg/app/workers"
 	"github.com/rqure/qlib/pkg/data/store"
@@ -68,21 +67,9 @@ func main() {
 	leadershipWorker.BecameLeader().Connect(smtpWorker.OnBecameLeader)
 	leadershipWorker.LosingLeadership().Connect(smtpWorker.OnLostLeadership)
 
-	// Create a new application configuration
-	config := qdb.ApplicationConfig{
-		Name: "smtp",
-		Workers: []qdb.IWorker{
-			storeWorker,
-			leadershipWorker,
-			smtpWorker,
-		},
-	}
-
-	// Create a new application
-	app := app.NewApplication(config)
-
-	smtpWorker.Quit.Connect(app.Quit)
-
-	// Execute the application
-	app.Execute()
+	a := app.NewApplication("smtp")
+	a.AddWorker(storeWorker)
+	a.AddWorker(leadershipWorker)
+	a.AddWorker(smtpWorker)
+	a.Execute()
 }
