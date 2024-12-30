@@ -27,4 +27,6 @@ jobs:
         with:
           push: true
           platforms: linux/amd64,linux/arm64,linux/arm/v7
-          tags: rqure/smtp:${{ github.ref_name }}
+          tags: |
+            rqure/smtp:${{ github.ref_name }}
+            rqure/smtp:latest
